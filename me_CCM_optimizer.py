@@ -27,7 +27,7 @@ M_rgb2xyz=np.array([[0.4123908 , 0.35758434, 0.18048079],
 def gamma(x,colorspace='sRGB'): #Gamma变换
     y=np. zeros (x. shape)
     y[x>1]=1
-    if colorspace in ( 'sRGB', 'srgh'):
+    if colorspace in ( 'sRGB', 'srgb'):
         y[(x>=0)&(x<=0.0031308)]=(323/25*x[ (x>=0)&(x<=0.0031308)])
         y[(x<=1)&(x>0.0031308)]=(1.055*abs(x[ (x<=1)&(x>0.0031308)])**(1/2.4)-0.055)
     elif colorspace in ('TP', 'my'):  
@@ -171,13 +171,16 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
     rgb_mean=np.zeros((24,3))   
     rgb_std=np.zeros((24,3))   
     for block_idx in range(24):
-        block=img[np.int(y_center[block_idx]-r_sample):np.int(y_center[block_idx]+r_sample),
-                  np.int(x_center[block_idx]-r_sample):np.int(x_center[block_idx]+r_sample),:]
+        # block=img[np.int(y_center[block_idx]-r_sample):np.int(y_center[block_idx]+r_sample),
+        #           np.int(x_center[block_idx]-r_sample):np.int(x_center[block_idx]+r_sample),:]
+        block=img[int(y_center[block_idx]-r_sample):int(y_center[block_idx]+r_sample),
+                  int(x_center[block_idx]-r_sample):int(x_center[block_idx]+r_sample),:]
         rgb_vector,_=im2vector(block)
         rgb_mean[block_idx,:]=rgb_vector.mean(axis=0)
         rgb_std[block_idx,:]=rgb_vector.std(axis=0)
     return (rgb_mean,rgb_std,poly_position)
 
+# def rawread
 #%% x-rite 色彩标准
 
 lab_ideal=np.array( # X-Rite官网提供的LAB色彩真值
@@ -238,9 +241,15 @@ img_g=(img_gr+img_gb)/2
 img=np.dstack((img_r,img_g,img_b))
 
 img_1=img #img_0:OB后的图像
-
+img_1[img_1<0]=0
 #%% 框选图片ROI
-(rgb_mean,rgb_std,poly_position)=impoly(img)
+'''
+(rgb_mean,rgb_std,poly_position)=impoly(img_0)
+
+'''
+# poly_position=[(539,441),(1463,439),(1456,1038),(550,1032)]
+poly_position=None
+(rgb_mean,rgb_std,poly_position)=impoly(img,poly_position=poly_position)
 # print(rgb_mean)
 #%% AE补偿和AWB自动白平衡
 
@@ -257,9 +266,41 @@ img=awb(img,awb_para)
 rgb_mean=awb(rgb_mean,awb_para)
 
 img_2=img
+img_2[img_2<0]=0
+img_2[img_2>1]=1
 # (rgb_mean,rgb_std,poly_position)=impoly(img,poly_position)
 
-#%%
+#%% 绘制动画脚本
+fig_exist=False
+def func_plot(x):
+    global fig_exist,h_fig,h_ax,f_lab,lab_ideal,h_p,f_obj,h_q
+    if not fig_exist:
+        h_fig=plt.figure(figsize=(6.2,8),tight_layout=True)
+        h_ax=plt.axes(xlim=(-50,60),ylim=(-60,90))
+        a,b=np.meshgrid(np.arange(-50,60,0.2),np.arange(90,-60,-0.2))
+        L=np.ones(a.shape)*70
+        img_back=lab2rgb(np.dstack((L,a,b)))
+        plt.imshow(img_back,extent=(-50,60,-60,90))
+        plt.plot(lab_ideal[:,1],lab_ideal[:,2],'ks')
+        h_p=plt.plot(f_lab(x)[:,1],f_lab(x)[:,2],'ko')[0]
+        u=f_lab(x)[:,1]-lab_ideal[:,1]
+        v=f_lab(x)[:,2]-lab_ideal[:,2]
+        h_q=plt.quiver(lab_ideal[:,1],lab_ideal[:,2],u,v,scale_units='xy',scale=1,width=0.003,headwidth=0,headlength=0)
+        plt.title('OBJ = {0}'.format(f_obj(x)))
+        plt.pause(0.01)
+        # h_fig.canvas.draw()
+        fig_exist=True
+    else:
+        plt.sca(h_ax)
+        h_p.set_xdata(f_lab(x)[:,1])
+        h_p.set_ydata(f_lab(x)[:,2])
+        h_q.U=f_lab(x)[:,1]-lab_ideal[:,1]
+        h_q.V=f_lab(x)[:,2]-lab_ideal[:,2]
+        plt.title('OBJ = {0}'.format(f_obj(x)))
+        plt.pause(0.01)
+        # h_fig.canvas.draw()
+        pass
+#%
 x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
                             [x[2],1-x[2]-x[3],x[3]],
                             [x[4],x[5],1-x[4]-x[5]]])
@@ -267,11 +308,15 @@ x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
 f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='sRGB'))
 f_error=lambda x : f_lab(x)-lab_ideal
 f_DeltaE=lambda x : np.sqrt((f_error(x)**2).sum(axis=1,keepdims=True)).mean()
+f_DeltaC=lambda x : np.sqrt((f_error(x)[:,1:]**2).sum(axis=1,keepdims=True)).mean()
+f_obj=lambda x : f_DeltaC(x)
 x0=np.array([0,0,0,0,0,0])
 print('初始值:',f_DeltaE(x0))
-func=lambda x : print('x = ',f_DeltaE(x))
-result=optimize.minimize(f_DeltaE,x0,method='Powell',callback=func)
-print(result)
+func=lambda x : print('',f_obj(x))
+result=optimize.minimize(f_obj,x0,method='BFGS',callback=func_plot)
+print('最优值:',f_DeltaE(result.x))
+print('最优解:')
+print(x2ccm(result.x))
 
 img_opti=gamma(ccm(img,x2ccm(result.x)))
 img_4=img_opti
