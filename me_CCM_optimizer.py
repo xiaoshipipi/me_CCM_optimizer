@@ -300,7 +300,7 @@ def func_plot(x):
         plt.pause(0.01)
         # h_fig.canvas.draw()
         pass
-#%
+#%%
 x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
                             [x[2],1-x[2]-x[3],x[3]],
                             [x[4],x[5],1-x[4]-x[5]]])
