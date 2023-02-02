@@ -10,11 +10,16 @@ import rawpy
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as optimize
+import os
 #%% 用户设置参数，可编辑
-file_path=r'.\IMG_1548.DNG'
+# file_path=r'.\IMG_1312.DNG'
+# file_path=r'.\IMG_1332.DNG'
+# file_path=r'.\IMG_1342.DNG'
+# file_path=r'.\IMG_1519.DNG'
+# file_path=r'.\IMG_1548.DNG'
+# file_path=r'.\IMG_3315.DNG'
+file_path=r'.\nikon_D850.nef'
 
-black_level=None #黑电平值，需根据设备不同更改，iPhone12的值为528
-white_level=None #白电平值，需根据设备不同更改，iPhone12的值为4095
 
 #%% 定义内部函数
 M_xyz2rgb=np.array([[3.24096994,-1.53738318,-0.49861076],
@@ -23,6 +28,40 @@ M_xyz2rgb=np.array([[3.24096994,-1.53738318,-0.49861076],
 M_rgb2xyz=np.array([[0.4123908 , 0.35758434, 0.18048079],
                     [0.21263901, 0.71516868, 0.07219231],
                     [0.01933082, 0.11919478, 0.95053216]])
+def bayer_demosaic(raw,bayer='RG'):
+    if bayer=='RG':
+        img_r=raw[0::2,0::2]
+        img_gr=raw[0::2,1::2]
+        img_gb=raw[1::2,0::2]
+        img_b=raw[1::2,1::2]
+    img=np.dstack((img_r,(img_gr+img_gb)/2,img_b))
+    return img   
+    
+def imread(file_path, size=None, bayer='RG', OB=None):
+    if os.path.splitext(file_path)[-1] in ('.nef','.NEF'):
+        # 读取nef文件，进行OB校正
+        H_raw=rawpy.imread(file_path)
+        raw=H_raw.raw_image
+        OB=H_raw.black_level_per_channel[0]
+        white_level=H_raw.camera_white_level_per_channel[0]
+        # H_raw.close()
+        img=bayer_demosaic(raw,bayer=bayer)
+        img[img<OB]=OB
+        img=(img-OB).astype('float32')/(white_level-OB)
+    elif os.path.splitext(file_path)[-1] in ('.DNG','.dng'):
+        # 读取dng文件，进行OB校正
+        H_raw=rawpy.imread(file_path)
+        raw=H_raw.raw_image
+        OB=H_raw.black_level_per_channel[0]
+        white_level=H_raw.white_level
+        if raw.ndim==2:
+            img=bayer_demosaic(raw,bayer=bayer)
+
+        elif raw.ndim==3:
+            img=raw[:,:,0:3]
+        img[img<OB]=OB
+        img=(img-OB).astype('float32')/(white_level-OB)
+    return img
 
 def gamma(x,colorspace='sRGB'): #Gamma变换
     y=np. zeros (x. shape)
@@ -137,7 +176,7 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
     import matplotlib.pyplot as plt
     if poly_position is None:
         fig=plt.figure(figsize=[12.,7.5],tight_layout=True)
-        plt.imshow(img)
+        h_img=plt.imshow(img)
         fig.show()
         # fig.canvas.set_window_title('waiting. ..')
         fig.canvas.manager.set_window_title('waiting. ..')
@@ -150,10 +189,12 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
     m=m.flatten()
     x_center=(1-m)*((1-n)*pos[0][0]+n*pos[1][0])+m*(n*pos[2][0]+(1-n)*pos[3][0])
     y_center=(1-m)*((1-n)*pos[0][1]+n*pos[1][1])+m*(n*pos[2][1]+(1-n)*pos[3][1])
-    r_sample=np.floor(min([abs(pos[1][0]-pos[0][0])/6,
-                           abs(pos[2][0]-pos[3][0])/6,
-                           abs(pos[1][1]-pos[2][1])/4,
-                           abs(pos[0][1]-pos[3][1])/4]))*0.2
+    r_sample=min([
+        ((pos[0][0]-pos[1][0])**2+(pos[0][1]-pos[1][1])**2)**0.5/6,
+        ((pos[1][0]-pos[2][0])**2+(pos[1][1]-pos[2][1])**2)**0.5/4,
+        ((pos[2][0]-pos[3][0])**2+(pos[2][1]-pos[3][1])**2)**0.5/6,
+        ((pos[3][0]-pos[0][0])**2+(pos[3][1]-pos[0][1])**2)**0.5/4,
+        ])*0.2
     if poly_position is None:
         plt.plot(pos[0][0],pos[0][1],'r+')
         plt.plot(pos[1][0],pos[1][1],'r+')
@@ -164,6 +205,7 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
         plt.plot(x_center+r_sample,y_center-r_sample,'y+')
         plt.plot(x_center-r_sample,y_center+r_sample,'y+')
         plt.plot(x_center+r_sample,y_center+r_sample,'y+')
+        plt.draw()
         fig.show()
         poly_position=pos
     else:
@@ -171,14 +213,13 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
     rgb_mean=np.zeros((24,3))   
     rgb_std=np.zeros((24,3))   
     for block_idx in range(24):
-        # block=img[np.int(y_center[block_idx]-r_sample):np.int(y_center[block_idx]+r_sample),
-        #           np.int(x_center[block_idx]-r_sample):np.int(x_center[block_idx]+r_sample),:]
         block=img[int(y_center[block_idx]-r_sample):int(y_center[block_idx]+r_sample),
                   int(x_center[block_idx]-r_sample):int(x_center[block_idx]+r_sample),:]
         rgb_vector,_=im2vector(block)
         rgb_mean[block_idx,:]=rgb_vector.mean(axis=0)
         rgb_std[block_idx,:]=rgb_vector.std(axis=0)
-    return (rgb_mean,rgb_std,poly_position)
+    plt.close(fig)
+    return (rgb_mean,rgb_std,poly_position,h_img,fig)
 
 # def rawread
 #%% x-rite 色彩标准
@@ -213,33 +254,7 @@ rgb_ideal=lab2rgb(lab_ideal)
 
 #%% 读取Raw图，预处理，转浮点，OB
 
-raw=rawpy.imread(file_path)
-img=raw.raw_image
-img_r=img[0::2,0::2].astype('float32')
-img_gr=img[0::2,1::2].astype('float32')
-img_gb=img[1::2,0::2].astype('float32')
-img_b=img[1::2,1::2].astype('float32')
-
-img_g=(img_gr+img_gb)/2
-
-
-#OB
-if black_level is None: #读取Raw图MetaData中黑电平值
-    black_level=raw.black_level_per_channel
-if white_level is None: #读取Raw图MetaData中白电平值
-    white_level=raw.white_level
-
-img_0=(np.dstack((img_r,img_g,img_b)))/(white_level) #img_0:未OB的图像
-
-img_r=(img_r-black_level[0])/(white_level-black_level[0])
-img_gr=(img_gr-black_level[1])/(white_level-black_level[1])
-img_gb=(img_gb-black_level[2])/(white_level-black_level[2])
-img_b=(img_b-black_level[3])/(white_level-black_level[3])
-
-img_g=(img_gr+img_gb)/2
-
-img=np.dstack((img_r,img_g,img_b))
-
+img=imread(file_path)
 img_1=img #img_0:OB后的图像
 img_1[img_1<0]=0
 #%% 框选图片ROI
@@ -249,7 +264,7 @@ img_1[img_1<0]=0
 '''
 # poly_position=[(539,441),(1463,439),(1456,1038),(550,1032)]
 poly_position=None
-(rgb_mean,rgb_std,poly_position)=impoly(img,poly_position=poly_position)
+(rgb_mean,rgb_std,poly_position,h_img,h_fig)=impoly(img,poly_position=poly_position)
 # print(rgb_mean)
 #%% AE补偿和AWB自动白平衡
 
@@ -282,6 +297,8 @@ def func_plot(x):
         img_back=lab2rgb(np.dstack((L,a,b)))
         plt.imshow(img_back,extent=(-50,60,-60,90))
         plt.plot(lab_ideal[:,1],lab_ideal[:,2],'ks')
+        for idx,lab_ideal_el in enumerate(lab_ideal):
+            plt.text(lab_ideal_el[1]-5,lab_ideal_el[2]+2,'{}'.format(idx+1))
         h_p=plt.plot(f_lab(x)[:,1],f_lab(x)[:,2],'ko')[0]
         u=f_lab(x)[:,1]-lab_ideal[:,1]
         v=f_lab(x)[:,2]-lab_ideal[:,2]
@@ -313,7 +330,7 @@ f_obj=lambda x : f_DeltaC(x)
 x0=np.array([0,0,0,0,0,0])
 print('初始值:',f_DeltaE(x0))
 func=lambda x : print('',f_obj(x))
-result=optimize.minimize(f_obj,x0,method='BFGS',callback=func_plot)
+result=optimize.minimize(f_obj,x0,method='Powell',callback=func_plot)
 print('最优值:',f_DeltaE(result.x))
 print('最优解:')
 print(x2ccm(result.x))
@@ -321,27 +338,23 @@ print(x2ccm(result.x))
 img_opti=gamma(ccm(img,x2ccm(result.x)))
 img_4=img_opti
 img_40=gamma(ccm(img,x2ccm(x0)))
-# plt.figure()
-# plt.imshow(img_opti)
+h_img.set_array(img_4)
+h_fig.canvas.flush_events()
 
 
-plt.subplots(2,3,squeeze=False,tight_layout=True)
-plt.subplot(2,3,1,xticks=[],yticks=[])
-plt.imshow(img_0)
-plt.title('RAW')
-plt.subplot(2,3,2,xticks=[],yticks=[])
+plt.subplots(2,2,squeeze=False,tight_layout=True)
+plt.subplot(2,2,1,xticks=[],yticks=[])
 plt.imshow(img_1)
-plt.title('BLC')
-plt.subplot(2,3,3,xticks=[],yticks=[])
+plt.title('RAW')
+plt.subplot(2,2,2,xticks=[],yticks=[])
 plt.imshow(img_2)
 plt.title('AWB')
-plt.subplot(2,3,4,xticks=[],yticks=[])
+plt.subplot(2,2,3,xticks=[],yticks=[])
 plt.imshow(img_40)
 plt.title('Gamma')
-plt.subplot(2,3,5,xticks=[],yticks=[])
+plt.subplot(2,2,4,xticks=[],yticks=[])
 plt.imshow(img_4)
 plt.title('CCM-Gamma')
-plt.subplot(2,3,6,xticks=[],yticks=[])
 
 
 
