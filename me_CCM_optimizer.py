@@ -18,8 +18,8 @@ import os
 # file_path=r'.\IMG_1519.DNG'
 # file_path=r'.\IMG_1548.DNG'
 # file_path=r'.\IMG_3315.DNG'
-file_path=r'.\nikon_D850.nef'
-
+# file_path=r'.\nikon_D850.nef'
+file_path=r".\nikon_D850.png"
 
 #%% 定义内部函数
 M_xyz2rgb=np.array([[3.24096994,-1.53738318,-0.49861076],
@@ -61,6 +61,13 @@ def imread(file_path, size=None, bayer='RG', OB=None):
             img=raw[:,:,0:3]
         img[img<OB]=OB
         img=(img-OB).astype('float32')/(white_level-OB)
+    elif os.path.splitext(file_path)[-1] in ('.jpg','.JPG','.bmp','.BMP'):
+        img=plt.imread(file_path)
+        img=img.astype('float32')/255
+    elif os.path.splitext(file_path)[-1] in ('.png','.PNG'):
+        img=plt.imread(file_path)
+        if img.shape[2]==4:
+            img=img[:,:,0:3]
     return img
 
 def gamma(x,colorspace='sRGB'): #Gamma变换
@@ -71,6 +78,8 @@ def gamma(x,colorspace='sRGB'): #Gamma变换
         y[(x<=1)&(x>0.0031308)]=(1.055*abs(x[ (x<=1)&(x>0.0031308)])**(1/2.4)-0.055)
     elif colorspace in ('TP', 'my'):  
         y[ (x>=0)&(x<=1)]=(1.42*(1-(0.42/(x[(x>=0)&(x<=1)]+0.42))))
+    elif colorspace in ('P3'):  
+        y[ (x>=0)&(x<=1)]=x[ (x>=0)&(x<=1)]**(1/2.6)
     elif (type(colorspace)==float)|(type(colorspace)==int):
         beta=colorspace
         y[ (x>=0)&(x<=1)]=((1+beta)*(1-(beta/(x[(x>=0)&(x<=1)]+beta))))
@@ -268,7 +277,8 @@ poly_position=None
 # print(rgb_mean)
 #%% AE补偿和AWB自动白平衡
 
-func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[20:24,1]))/np.prod(rgb_ideal[20:24,1])-1
+# func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[20:24,1],colorspace='sRGB'))/np.prod(rgb_ideal[20:24,1])-1
+func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[20:24,1],colorspace='P3'))/np.prod(rgb_ideal[20:24,1])-1
 ae_res=optimize.root_scalar(func_ae, bracket=[0, 100], method='brentq')
 ae_comp=ae_res.root
 print('AE补偿:',ae_comp)
@@ -314,6 +324,7 @@ def func_plot(x):
         h_q.U=f_lab(x)[:,1]-lab_ideal[:,1]
         h_q.V=f_lab(x)[:,2]-lab_ideal[:,2]
         plt.title('OBJ = {0}'.format(f_obj(x)))
+        plt.draw()
         plt.pause(0.01)
         # h_fig.canvas.draw()
         pass
@@ -322,11 +333,12 @@ x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
                             [x[2],1-x[2]-x[3],x[3]],
                             [x[4],x[5],1-x[4]-x[5]]])
 
-f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='sRGB'))
+# f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='sRGB'))
+f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='P3'))
 f_error=lambda x : f_lab(x)-lab_ideal
 f_DeltaE=lambda x : np.sqrt((f_error(x)**2).sum(axis=1,keepdims=True)).mean()
 f_DeltaC=lambda x : np.sqrt((f_error(x)[:,1:]**2).sum(axis=1,keepdims=True)).mean()
-f_obj=lambda x : f_DeltaC(x)
+f_obj=lambda x : f_DeltaE(x)
 x0=np.array([0,0,0,0,0,0])
 print('初始值:',f_DeltaE(x0))
 func=lambda x : print('',f_obj(x))
@@ -335,7 +347,7 @@ print('最优值:',f_DeltaE(result.x))
 print('最优解:')
 print(x2ccm(result.x))
 
-img_opti=gamma(ccm(img,x2ccm(result.x)))
+img_opti=gamma(ccm(img,x2ccm(result.x)),colorspace='sRGB')
 img_4=img_opti
 img_40=gamma(ccm(img,x2ccm(x0)))
 h_img.set_array(img_4)
@@ -356,6 +368,6 @@ plt.subplot(2,2,4,xticks=[],yticks=[])
 plt.imshow(img_4)
 plt.title('CCM-Gamma')
 
-
+print(np.hstack((np.arange(1,25).reshape((24,1)),np.around(f_error(result.x),3))))
 
 
