@@ -12,14 +12,16 @@ import numpy as np
 import scipy.optimize as optimize
 import os
 #%% 用户设置参数，可编辑
-# file_path=r'.\IMG_1312.DNG'
+file_path=r'.\IMG_1312.DNG'
 # file_path=r'.\IMG_1332.DNG'
 # file_path=r'.\IMG_1342.DNG'
 # file_path=r'.\IMG_1519.DNG'
 # file_path=r'.\IMG_1548.DNG'
 # file_path=r'.\IMG_3315.DNG'
 # file_path=r'.\nikon_D850.nef'
-file_path=r".\nikon_D850.png"
+# file_path=r"E:\Desktop\working\3D硬件_单反\0208_自然光色卡\Img0432.nef"
+# file_path=r"E:\Desktop\working\3D硬件_单反\3Dcloth\output\BASE.jpg"
+# file_path=r".\nikon_D850.png" #使用2.6的gamma优化更好
 
 #%% 定义内部函数
 M_xyz2rgb=np.array([[3.24096994,-1.53738318,-0.49861076],
@@ -28,7 +30,7 @@ M_xyz2rgb=np.array([[3.24096994,-1.53738318,-0.49861076],
 M_rgb2xyz=np.array([[0.4123908 , 0.35758434, 0.18048079],
                     [0.21263901, 0.71516868, 0.07219231],
                     [0.01933082, 0.11919478, 0.95053216]])
-def bayer_demosaic(raw,bayer='RG'):
+def bayer_demosaic(raw,bayer='RG'): #朴素的bayer插值算法
     if bayer=='RG':
         img_r=raw[0::2,0::2]
         img_gr=raw[0::2,1::2]
@@ -37,7 +39,7 @@ def bayer_demosaic(raw,bayer='RG'):
     img=np.dstack((img_r,(img_gr+img_gb)/2,img_b))
     return img   
     
-def imread(file_path, size=None, bayer='RG', OB=None):
+def imread(file_path, size=None, bayer='RG', OB=None): #图像读取函数
     if os.path.splitext(file_path)[-1] in ('.nef','.NEF'):
         # 读取nef文件，进行OB校正
         H_raw=rawpy.imread(file_path)
@@ -76,7 +78,7 @@ def gamma(x,colorspace='sRGB'): #Gamma变换
     if colorspace in ( 'sRGB', 'srgb'):
         y[(x>=0)&(x<=0.0031308)]=(323/25*x[ (x>=0)&(x<=0.0031308)])
         y[(x<=1)&(x>0.0031308)]=(1.055*abs(x[ (x<=1)&(x>0.0031308)])**(1/2.4)-0.055)
-    elif colorspace in ('TP', 'my'):  
+    elif colorspace in ('my'):  
         y[ (x>=0)&(x<=1)]=(1.42*(1-(0.42/(x[(x>=0)&(x<=1)]+0.42))))
     elif colorspace in ('P3'):  
         y[ (x>=0)&(x<=1)]=x[ (x>=0)&(x<=1)]**(1/2.6)
@@ -91,7 +93,7 @@ def gamma_reverse(x,colorspace= 'sRGB'): #逆Gamma变换
     if colorspace in ('sRGB', 'srgb'):
         y[(x>=0)&(x<=0.04045)]=x[(x>=0)&(x<=0.04045)]/12.92
         y[(x>0.04045)&(x<=1)]=((x[(x>0.04045)&(x<=1)]+0.055)/1.055)**2.4
-    elif colorspace in ('TP','my'):
+    elif colorspace in ('my'):
         y[(x>=0)&(x<=1)]=0.42/(1-(x[(x>=0)&(x<=1)]/1.42))-0.42         
     return y
 
@@ -101,7 +103,7 @@ def im2vector(img): #将图片转换为向量形式
     func_reverse=lambda rgb : np.reshape(rgb,(size[0],size[1],size[2]))
     return rgb, func_reverse    
 
-def awb(img, awb_para):  
+def awb(img, awb_para):  #图像做白平衡
     if (img.shape[1]==3)&(img.ndim==2):
         rgb=img
         func_reverse=lambda x : x    
@@ -113,7 +115,7 @@ def awb(img, awb_para):
     img=func_reverse(rgb)    
     return img
 
-def ccm(img, ccm):
+def ccm(img, ccm): #图像进行CCM颜色校正
     if (img.shape[1]==3)&(img.ndim==2):
         rgb=img
         func_reverse=lambda x : x    
@@ -227,10 +229,41 @@ def impoly(img,poly_position=None): #四边形框选图像ROI
         rgb_vector,_=im2vector(block)
         rgb_mean[block_idx,:]=rgb_vector.mean(axis=0)
         rgb_std[block_idx,:]=rgb_vector.std(axis=0)
-    plt.close(fig)
+    # plt.close(fig)
     return (rgb_mean,rgb_std,poly_position,h_img,fig)
 
-# def rawread
+def func_plot(x): # 绘制动画脚本
+    global fig_exist,h_fig,h_ax,f_lab,lab_ideal,h_p,f_obj,h_q
+    if not fig_exist:
+        h_fig=plt.figure(figsize=(6.2,8),tight_layout=True)
+        h_ax=plt.axes(xlim=(-50,60),ylim=(-60,90))
+        a,b=np.meshgrid(np.arange(-50,60,0.2),np.arange(90,-60,-0.2))
+        L=np.ones(a.shape)*70
+        img_back=lab2rgb(np.dstack((L,a,b)))
+        plt.imshow(img_back,extent=(-50,60,-60,90))
+        plt.plot(lab_ideal[:,1],lab_ideal[:,2],'ks')
+        for idx,lab_ideal_el in enumerate(lab_ideal):
+            plt.text(lab_ideal_el[1]-5,lab_ideal_el[2]+2,'{}'.format(idx+1))
+        h_p=plt.plot(f_lab(x)[:,1],f_lab(x)[:,2],'ko')[0]
+        u=f_lab(x)[:,1]-lab_ideal[:,1]
+        v=f_lab(x)[:,2]-lab_ideal[:,2]
+        h_q=plt.quiver(lab_ideal[:,1],lab_ideal[:,2],u,v,scale_units='xy',scale=1,width=0.003,headwidth=0,headlength=0)
+        plt.title('OBJ = {0}'.format(f_obj(x)))
+        plt.pause(0.01)
+        # h_fig.canvas.draw()
+        fig_exist=True
+    else:
+        plt.sca(h_ax)
+        h_p.set_xdata(f_lab(x)[:,1])
+        h_p.set_ydata(f_lab(x)[:,2])
+        h_q.U=f_lab(x)[:,1]-lab_ideal[:,1]
+        h_q.V=f_lab(x)[:,2]-lab_ideal[:,2]
+        plt.title('OBJ = {0}'.format(f_obj(x)))
+        plt.draw()
+        plt.pause(0.01)
+        # h_fig.canvas.draw()
+        pass
+
 #%% x-rite 色彩标准
 
 lab_ideal=np.array( # X-Rite官网提供的LAB色彩真值
@@ -262,112 +295,74 @@ lab_ideal=np.array( # X-Rite官网提供的LAB色彩真值
 rgb_ideal=lab2rgb(lab_ideal)
 
 #%% 读取Raw图，预处理，转浮点，OB
-
-img=imread(file_path)
-img_1=img #img_0:OB后的图像
-img_1[img_1<0]=0
-#%% 框选图片ROI
-'''
-(rgb_mean,rgb_std,poly_position)=impoly(img_0)
-
-'''
-# poly_position=[(539,441),(1463,439),(1456,1038),(550,1032)]
-poly_position=None
-(rgb_mean,rgb_std,poly_position,h_img,h_fig)=impoly(img,poly_position=poly_position)
-# print(rgb_mean)
-#%% AE补偿和AWB自动白平衡
-
-# func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[20:24,1],colorspace='sRGB'))/np.prod(rgb_ideal[20:24,1])-1
-func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[20:24,1],colorspace='P3'))/np.prod(rgb_ideal[20:24,1])-1
-ae_res=optimize.root_scalar(func_ae, bracket=[0, 100], method='brentq')
-ae_comp=ae_res.root
-print('AE补偿:',ae_comp)
-img=ae_comp*img
-rgb_mean=ae_comp*rgb_mean
-
-awb_para=[rgb_mean[22,1]/rgb_mean[22,0],1,rgb_mean[22,1]/rgb_mean[22,2]]
-print('AWB Gain = :',awb_para)
-img=awb(img,awb_para)
-rgb_mean=awb(rgb_mean,awb_para)
-
-img_2=img
-img_2[img_2<0]=0
-img_2[img_2>1]=1
-# (rgb_mean,rgb_std,poly_position)=impoly(img,poly_position)
-
-#%% 绘制动画脚本
-fig_exist=False
-def func_plot(x):
-    global fig_exist,h_fig,h_ax,f_lab,lab_ideal,h_p,f_obj,h_q
-    if not fig_exist:
-        h_fig=plt.figure(figsize=(6.2,8),tight_layout=True)
-        h_ax=plt.axes(xlim=(-50,60),ylim=(-60,90))
-        a,b=np.meshgrid(np.arange(-50,60,0.2),np.arange(90,-60,-0.2))
-        L=np.ones(a.shape)*70
-        img_back=lab2rgb(np.dstack((L,a,b)))
-        plt.imshow(img_back,extent=(-50,60,-60,90))
-        plt.plot(lab_ideal[:,1],lab_ideal[:,2],'ks')
-        for idx,lab_ideal_el in enumerate(lab_ideal):
-            plt.text(lab_ideal_el[1]-5,lab_ideal_el[2]+2,'{}'.format(idx+1))
-        h_p=plt.plot(f_lab(x)[:,1],f_lab(x)[:,2],'ko')[0]
-        u=f_lab(x)[:,1]-lab_ideal[:,1]
-        v=f_lab(x)[:,2]-lab_ideal[:,2]
-        h_q=plt.quiver(lab_ideal[:,1],lab_ideal[:,2],u,v,scale_units='xy',scale=1,width=0.003,headwidth=0,headlength=0)
-        plt.title('OBJ = {0}'.format(f_obj(x)))
-        plt.pause(0.01)
-        # h_fig.canvas.draw()
-        fig_exist=True
-    else:
-        plt.sca(h_ax)
-        h_p.set_xdata(f_lab(x)[:,1])
-        h_p.set_ydata(f_lab(x)[:,2])
-        h_q.U=f_lab(x)[:,1]-lab_ideal[:,1]
-        h_q.V=f_lab(x)[:,2]-lab_ideal[:,2]
-        plt.title('OBJ = {0}'.format(f_obj(x)))
-        plt.draw()
-        plt.pause(0.01)
-        # h_fig.canvas.draw()
-        pass
-#%%
-x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
-                            [x[2],1-x[2]-x[3],x[3]],
-                            [x[4],x[5],1-x[4]-x[5]]])
-
-# f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='sRGB'))
-f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean,x2ccm(x)),colorspace='P3'))
-f_error=lambda x : f_lab(x)-lab_ideal
-f_DeltaE=lambda x : np.sqrt((f_error(x)**2).sum(axis=1,keepdims=True)).mean()
-f_DeltaC=lambda x : np.sqrt((f_error(x)[:,1:]**2).sum(axis=1,keepdims=True)).mean()
-f_obj=lambda x : f_DeltaE(x)
-x0=np.array([0,0,0,0,0,0])
-print('初始值:',f_DeltaE(x0))
-func=lambda x : print('',f_obj(x))
-result=optimize.minimize(f_obj,x0,method='Powell',callback=func_plot)
-print('最优值:',f_DeltaE(result.x))
-print('最优解:')
-print(x2ccm(result.x))
-
-img_opti=gamma(ccm(img,x2ccm(result.x)),colorspace='sRGB')
-img_4=img_opti
-img_40=gamma(ccm(img,x2ccm(x0)))
-h_img.set_array(img_4)
-h_fig.canvas.flush_events()
-
-
-plt.subplots(2,2,squeeze=False,tight_layout=True)
-plt.subplot(2,2,1,xticks=[],yticks=[])
-plt.imshow(img_1)
-plt.title('RAW')
-plt.subplot(2,2,2,xticks=[],yticks=[])
-plt.imshow(img_2)
-plt.title('AWB')
-plt.subplot(2,2,3,xticks=[],yticks=[])
-plt.imshow(img_40)
-plt.title('Gamma')
-plt.subplot(2,2,4,xticks=[],yticks=[])
-plt.imshow(img_4)
-plt.title('CCM-Gamma')
-
-print(np.hstack((np.arange(1,25).reshape((24,1)),np.around(f_error(result.x),3))))
-
-
+if __name__=='__main__':
+    img=imread(file_path)
+    img_1=img #img_0:OB后的图像
+    img_1[img_1<0]=0
+    #%% 框选图片ROI
+    poly_position=None
+    (rgb_mean_0,rgb_std,poly_position,h_img,h_fig)=impoly(img,poly_position=poly_position)
+    # print(rgb_mean)
+    #%% AE补偿和AWB自动白平衡
+    rgb_mean=rgb_mean_0
+    # 最优化方法计算最佳曝光补偿
+    func_ae=lambda ae_comp : np.prod(gamma(ae_comp*rgb_mean[19:23,1],colorspace='sRGB'))/np.prod(rgb_ideal[19:23,1])-1
+    ae_res=optimize.root_scalar(func_ae, bracket=[0, 100], method='brentq')
+    ae_comp_0=ae_res.root
+    # 单独计算22色块的曝光补偿
+    # ae_comp=gamma_reverse(rgb_ideal,colorspace='sRGB')[20,1]/rgb_mean[20,1]
+    # ae_comp=gamma_reverse(rgb_ideal,colorspace='sRGB')[21,1]/rgb_mean[21,1]
+    # ae_comp=gamma_reverse(rgb_ideal,colorspace='sRGB')[22,1]/rgb_mean[22,1]
+    # ae_comp=1.4
+    # print('AE补偿:',ae_comp)
+    # img=ae_comp*img
+    # rgb_mean=ae_comp*rgb_mean
+    
+    awb_para=[rgb_mean[21,1]/rgb_mean[21,0],1,rgb_mean[21,1]/rgb_mean[21,2]]
+    rgb_mean=awb(rgb_mean,awb_para)
+    
+    # (rgb_mean,rgb_std,poly_position)=impoly(img,poly_position)
+    
+    #%%
+    x2ccm=lambda x : np.array([[1-x[0]-x[1],x[0],x[1]],
+                                [x[2],1-x[2]-x[3],x[3]],
+                                [x[4],x[5],1-x[4]-x[5]]])
+    
+    f_lab=lambda x : rgb2lab(gamma(ccm(rgb_mean*x[6],x2ccm(x)),colorspace='sRGB'))
+    f_error=lambda x : f_lab(x)-lab_ideal
+    f_DeltaE=lambda x : np.sqrt((f_error(x)**2).sum(axis=1,keepdims=True)).mean()
+    f_DeltaC=lambda x : np.sqrt((f_error(x)[:,1:]**2).sum(axis=1,keepdims=True)).mean()
+    f_obj=lambda x : f_DeltaE(x)
+    x0=np.array([0,0,0,0,0,0,ae_comp_0])
+    print('初始值:',round(f_DeltaE(x0),4))
+    func=lambda x : print('',f_obj(x))
+    fig_exist=False
+    result=optimize.minimize(f_obj,x0,method='Powell',callback=func_plot)
+    print('==最优解==')
+    print('最优值:',round(f_obj(result.x),4))
+    ae_comp=result.x[6]
+    print('AE补偿:',ae_comp)
+    print('AWB Gain = :',awb_para)
+    print('CCM:')
+    print(np.round(x2ccm(result.x),4))
+    
+    img_opti=gamma(ccm(awb(img*ae_comp,awb_para),x2ccm(result.x)),colorspace='sRGB')
+    h_img.set_array(img_opti)
+    h_fig.canvas.flush_events()
+    
+    #%%
+    plt.subplots(2,2,squeeze=False,tight_layout=True)
+    plt.subplot(2,2,1,xticks=[],yticks=[])
+    plt.imshow(img)
+    plt.title('RAW')
+    plt.subplot(2,2,2,xticks=[],yticks=[])
+    plt.imshow(awb(img*ae_comp,awb_para))
+    plt.title('AWB')
+    plt.subplot(2,2,3,xticks=[],yticks=[])
+    plt.imshow(gamma(awb(img*ae_comp,awb_para)))
+    plt.title('Gamma')
+    plt.subplot(2,2,4,xticks=[],yticks=[])
+    plt.imshow(img_opti)
+    plt.title('CCM-Gamma')
+    
+    # print(np.hstack((np.arange(1,25).reshape((24,1)),np.around(f_error(result.x),2))))
