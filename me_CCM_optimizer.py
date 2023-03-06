@@ -12,11 +12,11 @@ import numpy as np
 import scipy.optimize as optimize
 import os
 #%% 用户设置参数，可编辑
-file_path=r'.\IMG_1312.DNG'
+# file_path=r'.\IMG_1312.DNG'
 # file_path=r'.\IMG_1332.DNG'
 # file_path=r'.\IMG_1342.DNG'
 # file_path=r'.\IMG_1519.DNG'
-# file_path=r'.\IMG_1548.DNG'
+file_path=r'.\IMG_1548.DNG'
 # file_path=r'.\IMG_3315.DNG'
 # file_path=r'.\nikon_D850.nef'
 # file_path=r"E:\Desktop\working\3D硬件_单反\0208_自然光色卡\Img0432.nef"
@@ -293,6 +293,14 @@ lab_ideal=np.array( # X-Rite官网提供的LAB色彩真值
       [20.461,-0.079,-0.973]],dtype='float32')
 
 rgb_ideal=lab2rgb(lab_ideal)
+M_rgb2yuv=np.array([[0.299,0.587,0.114],
+                    [-0.169,-0.331,0.499],
+                    [0.499,-0.418,-0.081]])
+M_yuv2rgb=np.array([[9.99999554e-01, -4.46062343e-04,1.40465882],
+                     [9.99655449e-01, -3.44551299e-01,-7.15683665e-01],
+                     [1.00177531e+00,1.77530689,9.94081794e-04]])
+
+yuv_ideal=(M_rgb2yuv@gamma_reverse(rgb_ideal).T).T
 
 #%% 读取Raw图，预处理，转浮点，OB
 if __name__=='__main__':
@@ -345,12 +353,13 @@ if __name__=='__main__':
     print('AWB Gain = :',awb_para)
     print('CCM:')
     print(np.round(x2ccm(result.x),4))
-    
+
+#%%    
     img_opti=gamma(ccm(awb(img*ae_comp,awb_para),x2ccm(result.x)),colorspace='sRGB')
     h_img.set_array(img_opti)
     h_fig.canvas.flush_events()
     
-    #%%
+   
     plt.subplots(2,2,squeeze=False,tight_layout=True)
     plt.subplot(2,2,1,xticks=[],yticks=[])
     plt.imshow(img)
